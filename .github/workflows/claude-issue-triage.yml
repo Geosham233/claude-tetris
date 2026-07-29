@@ -38,7 +38,9 @@ jobs:
                No quites labels correctos ya existentes ni combines labels contradictorios (ej. bug + invalid)
                salvo que el análisis lo justifique.
 
-            3. Publica un único comentario de diagnóstico. Antes de crear uno nuevo, busca en los comentarios
+            3. Publica un único comentario de diagnóstico, escrito en formato Markdown compatible con GitHub
+               (encabezados, listas, negritas, bloques de código con \`\`\` según corresponda, etc.) para que se
+               renderice correctamente en la interfaz de GitHub. Antes de crear uno nuevo, busca en los comentarios
                existentes uno que empiece con el marcador `<!-- claude-issue-triage -->`; si ya existe, actualízalo
                (`gh api` con PATCH sobre ese comentario) en vez de duplicar. El comentario debe incluir, en este orden:
                - Resumen del problema (2-4 líneas)
