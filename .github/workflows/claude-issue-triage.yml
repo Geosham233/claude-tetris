@@ -1,0 +1,54 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Estás analizando el issue #${{ github.event.issue.number }} de ${{ github.repository }}: "${{ github.event.issue.title }}".
+
+            1. Lee el issue completo (`gh issue view ${{ github.event.issue.number }} --json title,body,labels,comments`)
+               y revisa el código del repo (game.js, index.html, style.css) para entender el contexto real.
+
+            2. Decide qué labels aplican, del siguiente conjunto:
+               - Default de GitHub: bug, enhancement, documentation, question, duplicate, invalid, help wanted, good first issue
+               - Específicos de Tetris (créalos con `gh label create <nombre> --color <hex> --description <texto>`
+                 si todavía no existen en el repo): game-logic (movimiento/rotación/colisión/puntuación de piezas),
+                 ui (canvas/CSS/layout), controls (teclado/input), performance
+               Aplica solo los relevantes con `gh issue edit ${{ github.event.issue.number }} --add-label "..."`.
+               No quites labels correctos ya existentes ni combines labels contradictorios (ej. bug + invalid)
+               salvo que el análisis lo justifique.
+
+            3. Publica un único comentario de diagnóstico. Antes de crear uno nuevo, busca en los comentarios
+               existentes uno que empiece con el marcador `<!-- claude-issue-triage -->`; si ya existe, actualízalo
+               (`gh api` con PATCH sobre ese comentario) en vez de duplicar. El comentario debe incluir, en este orden:
+               - Resumen del problema (2-4 líneas)
+               - Labels asignados y por qué
+               - Área del código afectada: archivo/función concreta de game.js/index.html/style.css donde
+                 probablemente está la causa
+               - Hipótesis de causa raíz, basada en el código real, no en suposiciones genéricas
+               - Un footer indicando que es un diagnóstico automático y que la solución se implementará aparte
+
+               No implementes la solución ni propongas cambios de código todavía — este análisis es insumo
+               para un trabajo de implementación posterior.
+          claude_args: |
+            --allowed-tools "Bash(gh issue view:*)" "Bash(gh issue edit:*)" "Bash(gh issue comment:*)" "Bash(gh label list:*)" "Bash(gh label create:*)" "Bash(gh api:*)"
