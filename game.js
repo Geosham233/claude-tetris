@@ -14,6 +14,8 @@ const COLORS = [
   '#64b5f6', // J - pale blue
   '#ffb74d', // L - orange
   '#90a4ae', // N - nut
+  '#ff5252', // bomb
+  '#ffee58', // lightning
 ];
 
 const PIECES = [
@@ -26,9 +28,18 @@ const PIECES = [
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
   [[8,8,8],[8,0,8],[8,8,8]],                  // N (nut)
+  [[9]],                                       // bomb (1x1)
+  [[10]],                                      // lightning (1x1)
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
+
+const BOMB_TYPE = 9;
+const LIGHTNING_TYPE = 10;
+const POWERUP_LINE_INTERVAL = 10;
+const EXPLOSION_RADIUS = 1;     // -> área 3x3
+const EXPLOSION_DURATION = 300; // ms de flash visual
+const LIGHTNING_DURATION = 300; // ms de flash visual
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
@@ -45,7 +56,8 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 
 const THEME_KEY = 'tetris-theme';
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
+    linesSincePowerUp, powerUpPending, nextPowerUpType, explosion, lightningEffect;
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -71,9 +83,23 @@ function createBoard() {
 }
 
 function randomPiece() {
+  // types 9 (bomb) y 10 (lightning) nunca se generan al azar; se inyectan de forma determinista desde clearLines()/spawn()
   const type = Math.floor(Math.random() * 8) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function createPowerUpPiece(type) {
+  const shape = PIECES[type].map(row => [...row]);
+  return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function isBomb(piece) {
+  return piece.type === BOMB_TYPE;
+}
+
+function isLightning(piece) {
+  return piece.type === LIGHTNING_TYPE;
 }
 
 function collide(shape, ox, oy) {
@@ -132,8 +158,29 @@ function clearLines() {
     score += (LINE_SCORES[cleared] || 0) * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    linesSincePowerUp += cleared;
+    if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
+      powerUpPending = true;
+      linesSincePowerUp -= POWERUP_LINE_INTERVAL;
+    }
     updateHUD();
   }
+}
+
+function triggerExplosion(cx, cy) {
+  for (let r = cy - EXPLOSION_RADIUS; r <= cy + EXPLOSION_RADIUS; r++) {
+    for (let c = cx - EXPLOSION_RADIUS; c <= cx + EXPLOSION_RADIUS; c++) {
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      board[r][c] = 0;
+    }
+  }
+  explosion = { x: cx, y: cy, startTime: performance.now() };
+}
+
+function triggerLightning(cx, cy) {
+  if (cy >= 0 && cy < ROWS) board[cy].fill(0);
+  if (cx >= 0 && cx < COLS) for (let r = 0; r < ROWS; r++) board[r][cx] = 0;
+  lightningEffect = { x: cx, y: cy, startTime: performance.now() };
 }
 
 function ghostY() {
@@ -160,14 +207,26 @@ function softDrop() {
 }
 
 function lockPiece() {
-  merge();
+  if (isBomb(current)) {
+    triggerExplosion(current.x, current.y);
+  } else if (isLightning(current)) {
+    triggerLightning(current.x, current.y);
+  } else {
+    merge();
+  }
   clearLines();
   spawn();
 }
 
 function spawn() {
   current = next;
-  next = randomPiece();
+  if (powerUpPending) {
+    next = createPowerUpPiece(nextPowerUpType);
+    nextPowerUpType = nextPowerUpType === BOMB_TYPE ? LIGHTNING_TYPE : BOMB_TYPE;
+    powerUpPending = false;
+  } else {
+    next = randomPiece();
+  }
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
@@ -189,6 +248,24 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  if (colorIndex === BOMB_TYPE) {
+    context.fillStyle = 'rgba(20,20,20,0.85)';
+    context.beginPath();
+    context.arc(x * size + size / 2, y * size + size / 2, size * 0.22, 0, Math.PI * 2);
+    context.fill();
+  }
+  if (colorIndex === LIGHTNING_TYPE) {
+    context.fillStyle = 'rgba(20,20,20,0.85)';
+    context.beginPath();
+    context.moveTo(x * size + size * 0.58, y * size + size * 0.12);
+    context.lineTo(x * size + size * 0.32, y * size + size * 0.55);
+    context.lineTo(x * size + size * 0.5, y * size + size * 0.55);
+    context.lineTo(x * size + size * 0.42, y * size + size * 0.88);
+    context.lineTo(x * size + size * 0.7, y * size + size * 0.42);
+    context.lineTo(x * size + size * 0.52, y * size + size * 0.42);
+    context.closePath();
+    context.fill();
+  }
   context.globalAlpha = 1;
 }
 
@@ -230,6 +307,40 @@ function draw() {
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+
+  drawExplosion();
+  drawLightningEffect();
+}
+
+function drawExplosion() {
+  if (!explosion) return;
+  const elapsed = performance.now() - explosion.startTime;
+  if (elapsed >= EXPLOSION_DURATION) { explosion = null; return; }
+  const t = elapsed / EXPLOSION_DURATION;
+  ctx.globalAlpha = 1 - t;
+  ctx.fillStyle = '#fff59d';
+  const left = Math.max(0, explosion.x - EXPLOSION_RADIUS);
+  const top = Math.max(0, explosion.y - EXPLOSION_RADIUS);
+  const right = Math.min(COLS - 1, explosion.x + EXPLOSION_RADIUS);
+  const bottom = Math.min(ROWS - 1, explosion.y + EXPLOSION_RADIUS);
+  ctx.fillRect(left * BLOCK, top * BLOCK, (right - left + 1) * BLOCK, (bottom - top + 1) * BLOCK);
+  ctx.globalAlpha = 1;
+}
+
+function drawLightningEffect() {
+  if (!lightningEffect) return;
+  const elapsed = performance.now() - lightningEffect.startTime;
+  if (elapsed >= LIGHTNING_DURATION) { lightningEffect = null; return; }
+  const t = elapsed / LIGHTNING_DURATION;
+  ctx.globalAlpha = 1 - t;
+  ctx.fillStyle = '#fff9c4';
+  if (lightningEffect.y >= 0 && lightningEffect.y < ROWS) {
+    ctx.fillRect(0, lightningEffect.y * BLOCK, COLS * BLOCK, BLOCK);
+  }
+  if (lightningEffect.x >= 0 && lightningEffect.x < COLS) {
+    ctx.fillRect(lightningEffect.x * BLOCK, 0, BLOCK, ROWS * BLOCK);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawNext() {
@@ -291,6 +402,11 @@ function init() {
   gameOver = false;
   dropInterval = 1000;
   dropAccum = 0;
+  linesSincePowerUp = 0;
+  powerUpPending = false;
+  nextPowerUpType = BOMB_TYPE;
+  explosion = null;
+  lightningEffect = null;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
