@@ -16,6 +16,7 @@ const COLORS = [
   '#90a4ae', // N - nut
   '#ff5252', // bomb
   '#ffee58', // lightning
+  '#ab47bc', // ink (wildcard)
 ];
 
 const PIECES = [
@@ -30,16 +31,19 @@ const PIECES = [
   [[8,8,8],[8,0,8],[8,8,8]],                  // N (nut)
   [[9]],                                       // bomb (1x1)
   [[10]],                                      // lightning (1x1)
+  [[11]],                                      // ink (1x1)
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
 const BOMB_TYPE = 9;
 const LIGHTNING_TYPE = 10;
+const INK_TYPE = 11;
 const POWERUP_LINE_INTERVAL = 10;
 const EXPLOSION_RADIUS = 1;     // -> área 3x3
 const EXPLOSION_DURATION = 300; // ms de flash visual
 const LIGHTNING_DURATION = 300; // ms de flash visual
+const INK_DURATION = 300;       // ms de flash visual
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
@@ -57,7 +61,7 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const THEME_KEY = 'tetris-theme';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
-    linesSincePowerUp, powerUpPending, nextPowerUpType, explosion, lightningEffect;
+    linesSincePowerUp, powerUpPending, nextPowerUpType, explosion, lightningEffect, inkEffect;
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -100,6 +104,10 @@ function isBomb(piece) {
 
 function isLightning(piece) {
   return piece.type === LIGHTNING_TYPE;
+}
+
+function isInk(piece) {
+  return piece.type === INK_TYPE;
 }
 
 function collide(shape, ox, oy) {
@@ -146,7 +154,7 @@ function merge() {
 function clearLines() {
   let cleared = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
-    if (board[r].every(v => v !== 0)) {
+    if (board[r].every(v => v !== 0) || board[r].includes(INK_TYPE)) {
       board.splice(r, 1);
       board.unshift(new Array(COLS).fill(0));
       cleared++;
@@ -183,6 +191,29 @@ function triggerLightning(cx, cy) {
   lightningEffect = { x: cx, y: cy, startTime: performance.now() };
 }
 
+function triggerInk(cx, cy) {
+  const freq = {};
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const v = board[r][c];
+      if (v && v !== INK_TYPE) freq[v] = (freq[v] || 0) + 1;
+    }
+  }
+  let targetColor = 0, maxCount = 0;
+  for (const key in freq) {
+    if (freq[key] > maxCount) {
+      maxCount = freq[key];
+      targetColor = Number(key);
+    }
+  }
+  if (targetColor) {
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (board[r][c] === targetColor) board[r][c] = INK_TYPE;
+  }
+  inkEffect = { x: cx, y: cy, startTime: performance.now() };
+}
+
 function ghostY() {
   let gy = current.y;
   while (!collide(current.shape, current.x, gy + 1)) gy++;
@@ -211,6 +242,8 @@ function lockPiece() {
     triggerExplosion(current.x, current.y);
   } else if (isLightning(current)) {
     triggerLightning(current.x, current.y);
+  } else if (isInk(current)) {
+    triggerInk(current.x, current.y);
   } else {
     merge();
   }
@@ -222,7 +255,9 @@ function spawn() {
   current = next;
   if (powerUpPending) {
     next = createPowerUpPiece(nextPowerUpType);
-    nextPowerUpType = nextPowerUpType === BOMB_TYPE ? LIGHTNING_TYPE : BOMB_TYPE;
+    if (nextPowerUpType === BOMB_TYPE) nextPowerUpType = LIGHTNING_TYPE;
+    else if (nextPowerUpType === LIGHTNING_TYPE) nextPowerUpType = INK_TYPE;
+    else nextPowerUpType = BOMB_TYPE;
     powerUpPending = false;
   } else {
     next = randomPiece();
@@ -263,6 +298,20 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
     context.lineTo(x * size + size * 0.42, y * size + size * 0.88);
     context.lineTo(x * size + size * 0.7, y * size + size * 0.42);
     context.lineTo(x * size + size * 0.52, y * size + size * 0.42);
+    context.closePath();
+    context.fill();
+  }
+  if (colorIndex === INK_TYPE) {
+    context.fillStyle = 'rgba(20,20,20,0.85)';
+    const cx = x * size + size / 2, cy = y * size + size / 2;
+    const spikes = 5, outerR = size * 0.28, innerR = size * 0.12;
+    context.beginPath();
+    for (let i = 0; i < spikes * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const angle = (Math.PI / spikes) * i - Math.PI / 2;
+      const px = cx + Math.cos(angle) * r, py = cy + Math.sin(angle) * r;
+      if (i === 0) context.moveTo(px, py); else context.lineTo(px, py);
+    }
     context.closePath();
     context.fill();
   }
@@ -310,6 +359,7 @@ function draw() {
 
   drawExplosion();
   drawLightningEffect();
+  drawInkEffect();
 }
 
 function drawExplosion() {
@@ -340,6 +390,17 @@ function drawLightningEffect() {
   if (lightningEffect.x >= 0 && lightningEffect.x < COLS) {
     ctx.fillRect(lightningEffect.x * BLOCK, 0, BLOCK, ROWS * BLOCK);
   }
+  ctx.globalAlpha = 1;
+}
+
+function drawInkEffect() {
+  if (!inkEffect) return;
+  const elapsed = performance.now() - inkEffect.startTime;
+  if (elapsed >= INK_DURATION) { inkEffect = null; return; }
+  const t = elapsed / INK_DURATION;
+  ctx.globalAlpha = (1 - t) * 0.5;
+  ctx.fillStyle = '#ab47bc';
+  ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
   ctx.globalAlpha = 1;
 }
 
@@ -407,6 +468,7 @@ function init() {
   nextPowerUpType = BOMB_TYPE;
   explosion = null;
   lightningEffect = null;
+  inkEffect = null;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
