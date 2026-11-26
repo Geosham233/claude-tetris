@@ -45,10 +45,12 @@ const LIGHTNING_TYPE = 10;
 const INK_TYPE = 11;
 const GRAVITY_TYPE = 12;
 const FREEZE_TYPE = 13;
-const POWERUP_LINE_INTERVAL = 10;
+const POWERUP_TYPES = [BOMB_TYPE, LIGHTNING_TYPE, INK_TYPE, GRAVITY_TYPE, FREEZE_TYPE];
+const POWERUP_LINE_INTERVAL = 5;
 const EXPLOSION_RADIUS = 1;     // -> área 3x3
 const EXPLOSION_DURATION = 300; // ms de flash visual
 const LIGHTNING_DURATION = 300; // ms de flash visual
+const LIGHTNING_FALL_DURATION = 250; // ms de caída de los bloques tras el flash
 const INK_DURATION = 300;       // ms de flash visual
 const GRAVITY_DURATION = 300;   // ms de flash visual
 const FREEZE_DURATION = 5000;   // ms de pausa real de la caída
@@ -69,8 +71,8 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const THEME_KEY = 'tetris-theme';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
-    linesSincePowerUp, powerUpPending, nextPowerUpType, explosion, lightningEffect, inkEffect,
-    gravityEffect, freezeUntil;
+    linesSincePowerUp, powerUpPending, explosion, lightningEffect, inkEffect,
+    gravityEffect, freezeRemaining;
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -96,7 +98,7 @@ function createBoard() {
 }
 
 function randomPiece() {
-  // types 9 (bomb) y 10 (lightning) nunca se generan al azar; se inyectan de forma determinista desde clearLines()/spawn()
+  // solo piezas normales (1-8); los power-ups se inyectan desde spawn() al completar líneas
   const type = Math.floor(Math.random() * 8) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
@@ -203,8 +205,12 @@ function triggerExplosion(cx, cy) {
 }
 
 function triggerLightning(cx, cy) {
-  if (cy >= 0 && cy < ROWS) board[cy].fill(0);
   if (cx >= 0 && cx < COLS) for (let r = 0; r < ROWS; r++) board[r][cx] = 0;
+  if (cy >= 0 && cy < ROWS) {
+    // la fila desaparece y todo lo que está encima baja una posición
+    board.splice(cy, 1);
+    board.unshift(new Array(COLS).fill(0));
+  }
   lightningEffect = { x: cx, y: cy, startTime: performance.now() };
 }
 
@@ -245,7 +251,7 @@ function triggerGravity(cx, cy) {
 }
 
 function triggerFreeze(cx, cy) {
-  freezeUntil = performance.now() + FREEZE_DURATION;
+  freezeRemaining = FREEZE_DURATION;
   dropAccum = 0;
 }
 
@@ -273,6 +279,7 @@ function softDrop() {
 }
 
 function lockPiece() {
+  lightningEffect = null; // evita animar un tablero que ya cambió
   if (isBomb(current)) {
     triggerExplosion(current.x, current.y);
   } else if (isLightning(current)) {
@@ -293,12 +300,8 @@ function lockPiece() {
 function spawn() {
   current = next;
   if (powerUpPending) {
-    next = createPowerUpPiece(nextPowerUpType);
-    if (nextPowerUpType === BOMB_TYPE) nextPowerUpType = LIGHTNING_TYPE;
-    else if (nextPowerUpType === LIGHTNING_TYPE) nextPowerUpType = INK_TYPE;
-    else if (nextPowerUpType === INK_TYPE) nextPowerUpType = GRAVITY_TYPE;
-    else if (nextPowerUpType === GRAVITY_TYPE) nextPowerUpType = FREEZE_TYPE;
-    else nextPowerUpType = BOMB_TYPE;
+    const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+    next = createPowerUpPiece(type);
     powerUpPending = false;
   } else {
     next = randomPiece();
@@ -408,9 +411,11 @@ function draw() {
   drawGrid();
 
   // board
-  for (let r = 0; r < ROWS; r++)
+  for (let r = 0; r < ROWS; r++) {
+    const offset = lightningFallOffset(r);
     for (let c = 0; c < COLS; c++)
-      drawBlock(ctx, c, r, board[r][c], BLOCK);
+      drawBlock(ctx, c, r - offset, board[r][c], BLOCK);
+  }
 
   // ghost
   const gy = ghostY();
@@ -446,10 +451,19 @@ function drawExplosion() {
   ctx.globalAlpha = 1;
 }
 
+// Cuántas celdas se dibuja una fila por encima de su posición final mientras cae
+function lightningFallOffset(row) {
+  if (!lightningEffect || row > lightningEffect.y) return 0;
+  const elapsed = performance.now() - lightningEffect.startTime - LIGHTNING_DURATION;
+  const t = Math.min(1, Math.max(0, elapsed / LIGHTNING_FALL_DURATION));
+  return 1 - t * t; // caída acelerada
+}
+
 function drawLightningEffect() {
   if (!lightningEffect) return;
   const elapsed = performance.now() - lightningEffect.startTime;
-  if (elapsed >= LIGHTNING_DURATION) { lightningEffect = null; return; }
+  if (elapsed >= LIGHTNING_DURATION + LIGHTNING_FALL_DURATION) { lightningEffect = null; return; }
+  if (elapsed >= LIGHTNING_DURATION) return; // solo queda la caída
   const t = elapsed / LIGHTNING_DURATION;
   ctx.globalAlpha = 1 - t;
   ctx.fillStyle = '#fff9c4';
@@ -485,8 +499,7 @@ function drawGravityEffect() {
 }
 
 function drawFreezeOverlay() {
-  if (!freezeUntil) return;
-  if (performance.now() >= freezeUntil) { freezeUntil = null; return; }
+  if (freezeRemaining <= 0) return;
   ctx.globalAlpha = 0.12;
   ctx.fillStyle = '#4fc3f7';
   ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
@@ -516,6 +529,7 @@ function togglePause() {
   if (gameOver) return;
   paused = !paused;
   if (!paused) {
+    overlay.classList.add('hidden');
     lastTime = performance.now();
     loop(lastTime);
   } else {
@@ -529,9 +543,9 @@ function togglePause() {
 function loop(ts) {
   const dt = ts - lastTime;
   lastTime = ts;
-  const frozen = freezeUntil && performance.now() < freezeUntil;
-  if (freezeUntil && !frozen) freezeUntil = null;
-  if (!frozen) {
+  if (freezeRemaining > 0) {
+    freezeRemaining = Math.max(0, freezeRemaining - dt);
+  } else {
     dropAccum += dt;
     if (dropAccum >= dropInterval) {
       dropAccum = 0;
@@ -558,12 +572,11 @@ function init() {
   dropAccum = 0;
   linesSincePowerUp = 0;
   powerUpPending = false;
-  nextPowerUpType = BOMB_TYPE;
   explosion = null;
   lightningEffect = null;
   inkEffect = null;
   gravityEffect = null;
-  freezeUntil = null;
+  freezeRemaining = 0;
   lastTime = performance.now();
   next = randomPiece();
   spawn();
