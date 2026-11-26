@@ -23,6 +23,12 @@
       <canvas id="board" width="300" height="600"></canvas>
 
       <aside class="panel">
+        <div class="panel-section hidden" id="objective">
+          <span class="label">OBJETIVO</span>
+          <strong id="objective-name"></strong>
+          <span id="objective-status"></span>
+        </div>
+
         <div class="panel-section">
           <span class="label">SCORE</span>
           <span class="value" id="score">0</span>
@@ -51,7 +57,7 @@
           <span class="label">CONTROLS</span>
           <ul>
             <li><kbd>←</kbd><kbd>→</kbd> mover</li>
-            <li><kbd>↑</kbd> rotar</li>
+            <li><kbd>↑</kbd> <span id="rotate-label">rotar</span></li>
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
             <li><kbd>P</kbd> pausa</li>
@@ -65,11 +71,14 @@
       <div class="overlay-box">
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
-        <button id="restart-btn">Reiniciar</button>
+        <div id="level-list" class="level-list hidden"></div>
+        <button id="restart-btn" class="overlay-btn" type="button">Reiniciar</button>
+        <button id="menu-btn" class="overlay-btn secondary" type="button">Menú</button>
       </div>
     </div>
   </div>
 
+  <script src="challenges.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

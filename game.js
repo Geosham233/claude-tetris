@@ -23,6 +23,8 @@ const COLORS = [
   '#aed581', // U (pentomino)
   '#7986cb', // Y (pentomino)
   '#fafafa', // single (recompensa por tetris)
+  '#9e9e9e', // basura (modo desafío)
+  '#546e7a', // bloque fijo (modo desafío)
 ];
 
 const PIECES = [
@@ -54,6 +56,10 @@ const PENTOMINO_CHANCE = 0.10;  // probabilidad total, repartida entre los pento
 const SINGLE_TYPE = 17;
 const TETRIS_LINES = 4;         // líneas de golpe que premian con una pieza 1x1
 
+const GARBAGE_TYPE = 18;
+const FIXED_TYPE = 19;          // solo desaparece al completar su línea
+const LOCK_FADE_DURATION = 600; // ms que tarda en desvanecerse una pieza invisible
+
 const BOMB_TYPE = 9;
 const LIGHTNING_TYPE = 10;
 const INK_TYPE = 11;
@@ -74,6 +80,7 @@ const TSPIN_SCORES = [400, 800, 1200, 1600];             // por 0-3 líneas
 const PERFECT_CLEAR_SCORES = [0, 800, 1200, 1800, 2000]; // por 1-4+ líneas
 const B2B_MULTIPLIER = 1.5;
 const CLEAR_NAMES = ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS'];
+const WIN_TITLE = '¡DESAFÍO SUPERADO!';
 const POPUP_DURATION = 1200;          // ms del texto flotante
 const PERFECT_FLASH_DURATION = 500;   // ms del destello de perfect clear
 const SHAKE_MAX_COMBO = 6;            // combo a partir del cual la sacudida no crece
@@ -93,13 +100,22 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const soundToggleBtn = document.getElementById('sound-toggle');
 const comboEl = document.getElementById('combo');
 const b2bEl = document.getElementById('b2b');
+const menuBtn = document.getElementById('menu-btn');
+const levelListEl = document.getElementById('level-list');
+const objectiveEl = document.getElementById('objective');
+const objectiveNameEl = document.getElementById('objective-name');
+const objectiveStatusEl = document.getElementById('objective-status');
+const rotateLabelEl = document.getElementById('rotate-label');
 
 const THEME_KEY = 'tetris-theme';
 const MUTE_KEY = 'tetris-muted';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
     linesSincePowerUp, powerUpPending, singlesPending, explosion, lightningEffect, inkEffect,
-    gravityEffect, freezeRemaining, combo, b2bActive, lastActionRotation, popup;
+    gravityEffect, freezeRemaining, combo, b2bActive, lastActionRotation, popup,
+    elapsed, garbageAccum, lockFade;
+let challenge = null; // null = modo clásico
+let inMenu = true;
 let muted = false;
 let audioCtx = null;
 
@@ -174,8 +190,21 @@ function playTurnSound({ cleared, tspin, b2b, perfect, comboCount }) {
   if (perfect) [523, 659, 784, 1047, 1319].forEach((f, i) => playTone(f, 0.3 + i * 0.09, 0.3, 'triangle', 0.12));
 }
 
-function createBoard() {
-  return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+function createBoard(layout = []) {
+  const result = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+  layout.forEach((row, i) => {
+    const r = ROWS - layout.length + i;
+    [...row].forEach((cell, c) => { if (cell === '#') result[r][c] = FIXED_TYPE; });
+  });
+  return result;
+}
+
+function startLevel() {
+  return challenge?.startLevel ?? 1;
+}
+
+function dropIntervalFor(lvl) {
+  return Math.max(100, 1000 - (lvl - 1) * 90);
 }
 
 function randomPiece() {
@@ -233,8 +262,13 @@ function rotateCW(shape) {
   return result;
 }
 
+function rotateCCW(shape) {
+  return rotateCW(rotateCW(rotateCW(shape)));
+}
+
 function tryRotate() {
-  const rotated = rotateCW(current.shape);
+  const rotate = challenge?.inverseRotation ? rotateCCW : rotateCW;
+  const rotated = rotate(current.shape);
   const kicks = [0, -1, 1, -2, 2];
   for (const kick of kicks) {
     if (!collide(rotated, current.x + kick, current.y)) {
@@ -305,8 +339,8 @@ function scoreTurn(cleared, tspin, isPowerUp) {
   score += points;
 
   lines += cleared;
-  level = Math.floor(lines / 10) + 1;
-  dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+  level = startLevel() + Math.floor(lines / 10);
+  dropInterval = dropIntervalFor(level);
   if (isTetris) singlesPending++;
   linesSincePowerUp += cleared;
   if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
@@ -346,27 +380,38 @@ function triggerExplosion(cx, cy) {
   for (let r = cy - EXPLOSION_RADIUS; r <= cy + EXPLOSION_RADIUS; r++) {
     for (let c = cx - EXPLOSION_RADIUS; c <= cx + EXPLOSION_RADIUS; c++) {
       if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
-      board[r][c] = 0;
+      if (board[r][c] !== FIXED_TYPE) board[r][c] = 0;
     }
   }
   explosion = { x: cx, y: cy, startTime: performance.now() };
 }
 
 function triggerLightning(cx, cy) {
-  if (cx >= 0 && cx < COLS) for (let r = 0; r < ROWS; r++) board[r][cx] = 0;
-  if (cy >= 0 && cy < ROWS) {
-    // la fila desaparece y todo lo que está encima baja una posición
-    board.splice(cy, 1);
-    board.unshift(new Array(COLS).fill(0));
+  if (cx >= 0 && cx < COLS) {
+    for (let r = 0; r < ROWS; r++) if (board[r][cx] !== FIXED_TYPE) board[r][cx] = 0;
   }
-  lightningEffect = { x: cx, y: cy, startTime: performance.now() };
+  let falls = false;
+  if (cy >= 0 && cy < ROWS) {
+    if (board[cy].includes(FIXED_TYPE)) {
+      // una fila con bloques fijos no desaparece: solo pierde el resto
+      board[cy] = board[cy].map(v => (v === FIXED_TYPE ? v : 0));
+    } else {
+      // la fila desaparece y todo lo que está encima baja una posición
+      board.splice(cy, 1);
+      board.unshift(new Array(COLS).fill(0));
+      falls = true;
+    }
+  }
+  lightningEffect = { x: cx, y: cy, falls, startTime: performance.now() };
 }
 
 function triggerInk(cx, cy) {
   const freq = {};
-  for (let r = 0; r < ROWS; r++) {
+  // las filas con bloques fijos quedan fuera: la tinta no puede eliminarlos
+  const rows = board.filter(row => !row.includes(FIXED_TYPE));
+  for (let r = 0; r < rows.length; r++) {
     for (let c = 0; c < COLS; c++) {
-      const v = board[r][c];
+      const v = rows[r][c];
       if (v && v !== INK_TYPE) freq[v] = (freq[v] || 0) + 1;
     }
   }
@@ -378,22 +423,25 @@ function triggerInk(cx, cy) {
     }
   }
   if (targetColor) {
-    for (let r = 0; r < ROWS; r++)
+    for (let r = 0; r < rows.length; r++)
       for (let c = 0; c < COLS; c++)
-        if (board[r][c] === targetColor) board[r][c] = INK_TYPE;
+        if (rows[r][c] === targetColor) rows[r][c] = INK_TYPE;
   }
   inkEffect = { x: cx, y: cy, startTime: performance.now() };
 }
 
 function triggerGravity(cx, cy) {
   for (let c = 0; c < COLS; c++) {
-    const colVals = [];
-    for (let r = 0; r < ROWS; r++) {
-      if (board[r][c]) colVals.push(board[r][c]);
+    let floor = ROWS - 1; // posición libre más baja donde puede caer un bloque
+    for (let r = ROWS - 1; r >= 0; r--) {
+      const v = board[r][c];
+      if (v === FIXED_TYPE) {
+        floor = r - 1;
+      } else if (v) {
+        board[r][c] = 0;
+        board[floor--][c] = v;
+      }
     }
-    for (let r = 0; r < ROWS; r++) board[r][c] = 0;
-    const start = ROWS - colVals.length;
-    for (let i = 0; i < colVals.length; i++) board[start + i][c] = colVals[i];
   }
   gravityEffect = { x: cx, y: cy, startTime: performance.now() };
 }
@@ -432,6 +480,7 @@ function lockPiece() {
   lightningEffect = null; // evita animar un tablero que ya cambió
   const isPowerUp = POWERUP_TYPES.includes(current.type);
   const tspin = isTSpin();
+  const lockedCells = [];
   if (isBomb(current)) {
     triggerExplosion(current.x, current.y);
   } else if (isLightning(current)) {
@@ -443,10 +492,37 @@ function lockPiece() {
   } else if (isFreeze(current)) {
     triggerFreeze(current.x, current.y);
   } else {
+    current.shape.forEach((row, r) => row.forEach((v, c) => {
+      if (v) lockedCells.push({ x: current.x + c, y: current.y + r, v });
+    }));
     merge();
   }
-  scoreTurn(clearLines(), tspin, isPowerUp);
+  const cleared = clearLines();
+  // si hubo líneas las filas se movieron, así que no hay fundido
+  lockFade = cleared ? null : { cells: lockedCells, startTime: performance.now() };
+  scoreTurn(cleared, tspin, isPowerUp);
+  if (challenge?.targetLines && lines >= challenge.targetLines) {
+    finishGame(true);
+    return;
+  }
   spawn();
+}
+
+function addGarbage() {
+  if (board[0].some(v => v !== 0)) {
+    finishGame(false);
+    return;
+  }
+  const hole = Math.floor(Math.random() * COLS);
+  board.shift();
+  board.push(Array.from({ length: COLS }, (_, c) => (c === hole ? 0 : GARBAGE_TYPE)));
+  lightningEffect = null; // evita animar un tablero que ya cambió
+  if (collide(current.shape, current.x, current.y)) {
+    current.y--;
+    lastActionRotation = false;
+    // la basura empuja la pieza fuera del tablero
+    if (current.shape.some((row, r) => current.y + r < 0 && row.some(v => v))) finishGame(false);
+  }
 }
 
 function spawn() {
@@ -464,7 +540,7 @@ function spawn() {
     next = randomPiece();
   }
   if (collide(current.shape, current.x, current.y)) {
-    endGame();
+    finishGame(false);
   }
   drawNext();
 }
@@ -475,6 +551,25 @@ function updateHUD() {
   levelEl.textContent = level;
   comboEl.textContent = combo ? `x${combo}` : '—';
   b2bEl.classList.toggle('hidden', !b2bActive);
+  updateObjective();
+}
+
+function formatTime(ms) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function updateObjective() {
+  objectiveEl.classList.toggle('hidden', !challenge);
+  if (!challenge) return;
+  const { targetLines, timeLimit, surviveTime, garbageInterval } = challenge;
+  const status = [];
+  if (targetLines) status.push(`Líneas ${Math.min(lines, targetLines)}/${targetLines}`);
+  const duration = timeLimit || surviveTime;
+  if (duration) status.push(`Tiempo ${formatTime(duration - elapsed)}`);
+  if (garbageInterval) status.push(`Basura en ${Math.ceil((garbageInterval - garbageAccum) / 1000)}s`);
+  const text = status.join('\n');
+  if (objectiveStatusEl.textContent !== text) objectiveStatusEl.textContent = text;
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -486,6 +581,16 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  if (colorIndex === FIXED_TYPE) {
+    context.strokeStyle = 'rgba(20,20,20,0.6)';
+    context.lineWidth = size * 0.1;
+    context.beginPath();
+    context.moveTo(x * size + size * 0.25, y * size + size * 0.25);
+    context.lineTo(x * size + size * 0.75, y * size + size * 0.75);
+    context.moveTo(x * size + size * 0.75, y * size + size * 0.25);
+    context.lineTo(x * size + size * 0.25, y * size + size * 0.75);
+    context.stroke();
+  }
   if (colorIndex === SINGLE_TYPE) {
     // contorno para que el bloque blanco se vea en el tema claro
     context.strokeStyle = 'rgba(20,20,20,0.85)';
@@ -575,13 +680,28 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid();
 
-  // board
-  for (let r = 0; r < ROWS; r++) {
-    const offset = lightningFallOffset(r);
-    for (let c = 0; c < COLS; c++)
-      drawBlock(ctx, c, r - offset, board[r][c], BLOCK);
+  // board (oculto en el desafío de invisibles hasta que termina la partida)
+  if (challenge?.invisible && !gameOver) {
+    drawLockFade();
+  } else {
+    for (let r = 0; r < ROWS; r++) {
+      const offset = lightningFallOffset(r);
+      for (let c = 0; c < COLS; c++)
+        drawBlock(ctx, c, r - offset, board[r][c], BLOCK);
+    }
   }
 
+  if (!gameOver) drawActivePiece();
+
+  drawExplosion();
+  drawLightningEffect();
+  drawInkEffect();
+  drawGravityEffect();
+  drawFreezeOverlay();
+  drawComboPopup();
+}
+
+function drawActivePiece() {
   // ghost
   const gy = ghostY();
   for (let r = 0; r < current.shape.length; r++)
@@ -593,13 +713,13 @@ function draw() {
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+}
 
-  drawExplosion();
-  drawLightningEffect();
-  drawInkEffect();
-  drawGravityEffect();
-  drawFreezeOverlay();
-  drawComboPopup();
+function drawLockFade() {
+  if (!lockFade) return;
+  const t = Math.max(0, (performance.now() - lockFade.startTime) / LOCK_FADE_DURATION);
+  if (t >= 1) { lockFade = null; return; }
+  lockFade.cells.forEach(({ x, y, v }) => drawBlock(ctx, x, y, v, BLOCK, 1 - t));
 }
 
 function drawComboPopup() {
@@ -652,7 +772,7 @@ function drawExplosion() {
 
 // Cuántas celdas se dibuja una fila por encima de su posición final mientras cae
 function lightningFallOffset(row) {
-  if (!lightningEffect || row > lightningEffect.y) return 0;
+  if (!lightningEffect?.falls || row > lightningEffect.y) return 0;
   const elapsed = performance.now() - lightningEffect.startTime - LIGHTNING_DURATION;
   const t = Math.min(1, Math.max(0, elapsed / LIGHTNING_FALL_DURATION));
   return 1 - t * t; // caída acelerada
@@ -716,16 +836,68 @@ function drawNext() {
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
 }
 
-function endGame() {
-  gameOver = true;
-  cancelAnimationFrame(animId);
-  overlayTitle.textContent = 'GAME OVER';
-  overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
+function showOverlay(title, detail, { menu = false } = {}) {
+  overlayTitle.textContent = title;
+  overlayTitle.classList.toggle('success', title === WIN_TITLE);
+  overlayScore.textContent = detail;
+  levelListEl.classList.toggle('hidden', !menu);
+  restartBtn.classList.toggle('hidden', menu);
+  menuBtn.classList.toggle('hidden', menu);
   overlay.classList.remove('hidden');
 }
 
+function finishGame(won, title = won ? WIN_TITLE : 'GAME OVER') {
+  gameOver = true;
+  cancelAnimationFrame(animId);
+  if (won && challenge) saveCompletedChallenge(challenge.id);
+  // sin efectos a medias congelados en el último fotograma
+  explosion = lightningEffect = inkEffect = gravityEffect = popup = null;
+  freezeRemaining = 0;
+  draw();
+  updateHUD();
+  showOverlay(title, `Puntuación: ${score.toLocaleString()}`);
+}
+
+function renderLevelList() {
+  const completed = loadCompletedChallenges();
+  const options = [
+    { name: 'Clásico', description: 'Partida sin objetivos', value: null },
+    ...CHALLENGES.map((c, i) => ({
+      name: `${i + 1}. ${c.name}${completed.includes(c.id) ? ' ✓' : ''}`,
+      description: c.description,
+      value: c,
+    })),
+  ];
+  levelListEl.replaceChildren(...options.map(({ name, description, value }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'level-btn';
+    const title = document.createElement('strong');
+    title.textContent = name;
+    const detail = document.createElement('span');
+    detail.textContent = description;
+    button.append(title, detail);
+    button.addEventListener('click', () => {
+      initAudio();
+      button.blur();
+      challenge = value;
+      init();
+    });
+    return button;
+  }));
+}
+
+function showMenu() {
+  cancelAnimationFrame(animId);
+  inMenu = true;
+  challenge = null;
+  objectiveEl.classList.add('hidden');
+  renderLevelList();
+  showOverlay('MODOS', '', { menu: true });
+}
+
 function togglePause() {
-  if (gameOver) return;
+  if (gameOver || inMenu) return;
   paused = !paused;
   if (!paused) {
     overlay.classList.add('hidden');
@@ -733,18 +905,35 @@ function togglePause() {
     loop(lastTime);
   } else {
     cancelAnimationFrame(animId);
-    overlayTitle.textContent = 'PAUSA';
-    overlayScore.textContent = '';
-    overlay.classList.remove('hidden');
+    showOverlay('PAUSA', '');
   }
 }
 
 function loop(ts) {
-  const dt = ts - lastTime;
+  const dt = Math.max(0, ts - lastTime);
   lastTime = ts;
+  if (challenge) {
+    elapsed += dt;
+    if (challenge.timeLimit && elapsed >= challenge.timeLimit) {
+      finishGame(false, 'TIEMPO AGOTADO');
+      return;
+    }
+    if (challenge.surviveTime && elapsed >= challenge.surviveTime) {
+      finishGame(true);
+      return;
+    }
+  }
   if (freezeRemaining > 0) {
     freezeRemaining = Math.max(0, freezeRemaining - dt);
   } else {
+    if (challenge?.garbageInterval) {
+      garbageAccum += dt;
+      if (garbageAccum >= challenge.garbageInterval) {
+        garbageAccum -= challenge.garbageInterval;
+        addGarbage();
+        if (gameOver) return;
+      }
+    }
     dropAccum += dt;
     if (dropAccum >= dropInterval) {
       dropAccum = 0;
@@ -757,18 +946,23 @@ function loop(ts) {
     }
   }
   if (gameOver) return;
+  updateObjective();
   draw();
   animId = requestAnimationFrame(loop);
 }
 
 function init() {
-  board = createBoard();
+  board = createBoard(challenge?.layout);
   score = 0;
   lines = 0;
-  level = 1;
+  level = startLevel();
   paused = false;
   gameOver = false;
-  dropInterval = 1000;
+  inMenu = false;
+  elapsed = 0;
+  garbageAccum = 0;
+  lockFade = null;
+  dropInterval = dropIntervalFor(level);
   dropAccum = 0;
   linesSincePowerUp = 0;
   powerUpPending = false;
@@ -782,6 +976,8 @@ function init() {
   b2bActive = false;
   popup = null;
   canvas.classList.remove('shake');
+  objectiveNameEl.textContent = challenge?.name ?? '';
+  rotateLabelEl.textContent = challenge?.inverseRotation ? 'rotar ↺' : 'rotar';
   lastTime = performance.now();
   next = randomPiece();
   spawn();
@@ -794,6 +990,7 @@ function init() {
 document.addEventListener('keydown', e => {
   initAudio();
   if (e.code === 'KeyM') { toggleMute(); return; }
+  if (inMenu) return;
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
@@ -830,4 +1027,15 @@ restartBtn.addEventListener('click', () => {
   init();
 });
 
-init();
+menuBtn.addEventListener('click', () => {
+  menuBtn.blur();
+  showMenu();
+});
+
+// una pestaña oculta no debe consumir el tiempo de un desafío
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && challenge && !paused) togglePause();
+});
+
+drawGrid();
+showMenu();

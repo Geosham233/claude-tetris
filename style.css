@@ -59,6 +59,8 @@ body {
 }
 
 .header-row {
+  position: relative;
+  z-index: 1; /* tema y sonido siguen accesibles con el overlay abierto */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,6 +146,23 @@ body {
   border: 1px solid var(--panel-border);
   background: var(--board-bg);
   border-radius: 4px;
+}
+
+/* ---- Objetivo ---- */
+.panel-section.hidden {
+  display: none;
+}
+
+#objective-name {
+  font-size: 14px;
+  color: var(--accent);
+}
+
+#objective-status {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: pre-line;
 }
 
 /* ---- Combo ---- */
@@ -243,8 +262,13 @@ kbd {
   color: var(--accent);
 }
 
-#restart-btn {
-  margin-top: 8px;
+#overlay-title.success {
+  color: var(--accent);
+  font-size: 22px;
+}
+
+.overlay-btn {
+  min-width: 140px;
   background: var(--accent);
   color: var(--accent-contrast);
   border: none;
@@ -257,6 +281,59 @@ kbd {
   transition: background 0.15s;
 }
 
-#restart-btn:hover {
+.overlay-btn:hover {
   background: var(--accent-hover);
+}
+
+.overlay-btn.secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--panel-border);
+}
+
+.overlay-btn.secondary:hover {
+  background: transparent;
+  border-color: var(--accent);
+}
+
+.overlay-btn.hidden,
+.level-list.hidden {
+  display: none;
+}
+
+/* ---- Menú de modos ---- */
+.level-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 320px;
+}
+
+.level-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: var(--board-bg);
+  color: var(--fg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.level-btn:hover,
+.level-btn:focus-visible {
+  border-color: var(--accent);
+}
+
+.level-btn strong {
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.level-btn span {
+  font-size: 12px;
+  color: var(--label-color);
 }

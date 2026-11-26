@@ -18,6 +18,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
     - [Opción 2: servidor local (recomendado)](#opción-2-servidor-local-recomendado)
   - [Controles](#controles)
   - [Combos y bonus](#combos-y-bonus)
+  - [Modo desafío](#modo-desafío)
   - [Cómo funciona](#cómo-funciona)
     - [1. `index.html`](#1-indexhtml)
     - [2. `style.css`](#2-stylecss)
@@ -45,7 +46,8 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Sistema de puntuación** clásico de Tetris (100 / 300 / 500 / 800 multiplicado por nivel).
 - **Modo combo y multiplicadores** (ver [Combos y bonus](#combos-y-bonus)), con efectos visuales y sonoros.
 - **Niveles** que aumentan cada 10 líneas y aceleran la caída.
-- **Pausa** y **Game Over** con opción de reinicio.
+- **Pausa** y **Game Over** con opción de reinicio o regreso al menú.
+- **Modo desafío** con 5 niveles con objetivos (ver [Modo desafío](#modo-desafío)).
 
 ---
 
@@ -106,9 +108,29 @@ Puntos de una limpieza: `base × B2B × combo + perfect clear`. El T-spin sin l�
 
 ---
 
+## Modo desafío
+
+Al abrir el juego aparece el menú de modos: **Clásico** o cualquiera de los 5 desafíos, disponibles desde el inicio. Los superados se marcan con ✓ (se guardan en `localStorage`).
+
+| Nivel                   | Mecánica                                            | Victoria             |
+| ----------------------- | --------------------------------------------------- | -------------------- |
+| **1. Contrarreloj**     | Límite de 2 minutos                                 | Limpiar 40 líneas    |
+| **2. Basura**           | Sube una fila con un hueco cada 10 s                | Sobrevivir 2 minutos |
+| **3. Bloques fijos**    | Tablero pre-colocado                                | Limpiar 10 líneas    |
+| **4. Invisibles**       | Las piezas se desvanecen al fijarse                 | Limpiar 10 líneas    |
+| **5. Rotación inversa** | Empieza en el nivel 7 y gira en sentido antihorario | Limpiar 15 líneas    |
+
+- Los bloques fijos solo desaparecen al completar su línea; los power-ups no los destruyen.
+- El power-up de congelar detiene la caída y la basura, pero no el reloj.
+- Al ocultar la pestaña, el desafío se pausa.
+
+Los niveles se configuran en `challenges.js`.
+
+---
+
 ## Cómo funciona
 
-El juego se compone de tres archivos que cooperan:
+El juego se compone de cuatro archivos que cooperan:
 
 ### 1. `index.html`
 
@@ -116,7 +138,7 @@ Define la estructura visual:
 
 - Un `<canvas id="board">` de **300 × 600** píxeles donde se renderiza el tablero.
 - Un panel lateral con `SCORE`, `LINES`, `LEVEL`, vista de la siguiente pieza y la lista de controles.
-- Un overlay para los estados **PAUSA** y **GAME OVER**.
+- Un overlay para el menú de modos y los estados **PAUSA**, **GAME OVER** y desafío superado.
 
 ### 2. `style.css`
 
@@ -136,9 +158,13 @@ Contiene toda la lógica del juego. A grandes rasgos:
 - **Nivel y velocidad**: el nivel sube cada 10 líneas; la velocidad de caída se calcula como `max(100, 1000 − (level − 1) × 90)` milisegundos.
 - **Ghost piece** (`ghostY`): proyecta la posición final de la pieza actual hacia abajo y la dibuja con `globalAlpha = 0.2`.
 
+`challenges.js` define los niveles del modo desafío y guarda el progreso.
+
 ### Flujo del juego
 
 ```
+showMenu() → elegir modo
+        ↓
 init()
   ├─ createBoard()                  → matriz vacía
   ├─ next = randomPiece()
@@ -154,7 +180,7 @@ init()
    keydown → mover / rotar / soft-drop / hard-drop / pausa
 ```
 
-Cuando una pieza recién generada ya colisiona al aparecer (`spawn`), se dispara `endGame()` y se muestra el overlay de **Game Over**.
+Cuando una pieza recién generada ya colisiona al aparecer (`spawn`), se dispara `finishGame(false)` y se muestra el overlay de **Game Over**.
 
 ---
 
@@ -176,7 +202,8 @@ Cuando una pieza recién generada ya colisiona al aparecer (`spawn`), se dispara
 03-tetris/
 ├── index.html      # Estructura del DOM y canvas
 ├── style.css       # Estilos del juego (dark theme)
-├── game.js         # Toda la lógica del Tetris (~300 líneas)
+├── challenges.js   # Niveles del modo desafío y progreso
+├── game.js         # Lógica del Tetris
 └── README.md
 ```
 
