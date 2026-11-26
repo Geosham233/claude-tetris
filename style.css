@@ -141,7 +141,7 @@ body {
   letter-spacing: 1px;
 }
 
-#next-canvas {
+.preview-canvas {
   display: block;
   border: 1px solid var(--panel-border);
   background: var(--board-bg);
@@ -163,6 +163,60 @@ body {
   font-size: 13px;
   font-weight: 700;
   white-space: pre-line;
+}
+
+/* ---- Habilidades ---- */
+.panel.side {
+  width: 120px;
+}
+
+.side .preview-canvas {
+  align-self: flex-start;
+}
+
+.energy-bar {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 24px;
+  height: 90px;
+  border: 1px solid var(--panel-border);
+  background: var(--board-bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#energy-fill {
+  height: 0;
+  background: var(--accent);
+  transition: height 0.2s;
+}
+
+.energy-bar.ready {
+  border-color: #ffb300;
+  box-shadow: 0 0 12px #ffb300;
+}
+
+.energy-bar.ready #energy-fill {
+  background: #ffb300;
+}
+
+.overlay-btn.ability-btn {
+  min-width: 0;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+
+.overlay-btn.ability-btn:disabled {
+  background: var(--accent);
+  opacity: 0.4;
+  cursor: default;
+}
+
+#slow-status {
+  min-height: 1.2em;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* ---- Combo ---- */
@@ -326,6 +380,12 @@ kbd {
 .level-btn:hover,
 .level-btn:focus-visible {
   border-color: var(--accent);
+}
+
+.level-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  border-color: var(--panel-border);
 }
 
 .level-btn strong {

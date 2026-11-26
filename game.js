@@ -50,7 +50,7 @@ const PIECES = [
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
-const BASE_PIECE_COUNT = 8;     // tipos 1-8: clásicas + N
+const BASE_TYPES = [1, 2, 3, 4, 5, 6, 7, 8]; // clásicas + N
 const PENTOMINO_TYPES = [14, 15, 16];
 const PENTOMINO_CHANCE = 0.10;  // probabilidad total, repartida entre los pentominós
 const SINGLE_TYPE = 17;
@@ -89,6 +89,16 @@ const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
 const nextCtx = nextCanvas.getContext('2d');
+const peekSectionEl = document.getElementById('peek-section');
+const peekCanvas = document.getElementById('peek-canvas');
+const peekCtx = peekCanvas.getContext('2d');
+const holdCanvas = document.getElementById('hold-canvas');
+const holdCtx = holdCanvas.getContext('2d');
+const energyBarEl = document.getElementById('energy-bar');
+const energyFillEl = document.getElementById('energy-fill');
+const abilityBtn = document.getElementById('ability-btn');
+const slowStatusEl = document.getElementById('slow-status');
+const abilityListEl = document.getElementById('ability-list');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
@@ -110,10 +120,11 @@ const rotateLabelEl = document.getElementById('rotate-label');
 const THEME_KEY = 'tetris-theme';
 const MUTE_KEY = 'tetris-muted';
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
+let board, current, queue, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
     linesSincePowerUp, powerUpPending, singlesPending, explosion, lightningEffect, inkEffect,
     gravityEffect, freezeRemaining, combo, b2bActive, lastActionRotation, popup,
-    elapsed, garbageAccum, lockFade;
+    elapsed, garbageAccum, lockFade,
+    energy, heldType, peekRemaining, slowRemaining, undoSnapshot, spawnScore, choosingAbility;
 let challenge = null; // null = modo clásico
 let inMenu = true;
 let muted = false;
@@ -211,7 +222,7 @@ function randomPiece() {
   // piezas normales y pentominós; power-ups y 1x1 se inyectan desde spawn() al completar líneas
   const type = Math.random() < PENTOMINO_CHANCE
     ? PENTOMINO_TYPES[Math.floor(Math.random() * PENTOMINO_TYPES.length)]
-    : Math.floor(Math.random() * BASE_PIECE_COUNT) + 1;
+    : BASE_TYPES[Math.floor(Math.random() * BASE_TYPES.length)];
   return createPiece(type);
 }
 
@@ -342,6 +353,7 @@ function scoreTurn(cleared, tspin, isPowerUp) {
   level = startLevel() + Math.floor(lines / 10);
   dropInterval = dropIntervalFor(level);
   if (isTetris) singlesPending++;
+  gainEnergy(cleared);
   linesSincePowerUp += cleared;
   if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
     powerUpPending = true;
@@ -477,6 +489,7 @@ function softDrop() {
 }
 
 function lockPiece() {
+  undoSnapshot = takeSnapshot();
   lightningEffect = null; // evita animar un tablero que ya cambió
   const isPowerUp = POWERUP_TYPES.includes(current.type);
   const tspin = isTSpin();
@@ -516,6 +529,7 @@ function addGarbage() {
   const hole = Math.floor(Math.random() * COLS);
   board.shift();
   board.push(Array.from({ length: COLS }, (_, c) => (c === hole ? 0 : GARBAGE_TYPE)));
+  undoSnapshot = null; // deshacer borraría la basura recién subida
   lightningEffect = null; // evita animar un tablero que ya cambió
   if (collide(current.shape, current.x, current.y)) {
     current.y--;
@@ -525,24 +539,31 @@ function addGarbage() {
   }
 }
 
+// La cola siempre tiene generadas al menos las piezas que puede revelar la visión
+function fillQueue() {
+  while (queue.length < PEEK_COUNT) queue.push(randomPiece());
+}
+
 function spawn() {
-  current = next;
+  current = queue.shift();
   lastActionRotation = false;
+  spawnScore = score;
+  // las recompensas se cuelan al frente de la cola
   if (powerUpPending) {
     const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-    next = createPiece(type);
+    queue.unshift(createPiece(type));
     powerUpPending = false;
   } else if (singlesPending > 0) {
     // el power-up tiene prioridad; la 1x1 sale justo después
-    next = createPiece(SINGLE_TYPE);
+    queue.unshift(createPiece(SINGLE_TYPE));
     singlesPending--;
-  } else {
-    next = randomPiece();
   }
+  fillQueue();
+  if (peekRemaining > 0) peekRemaining--;
   if (collide(current.shape, current.x, current.y)) {
     finishGame(false);
   }
-  drawNext();
+  drawPreviews();
 }
 
 function updateHUD() {
@@ -551,7 +572,23 @@ function updateHUD() {
   levelEl.textContent = level;
   comboEl.textContent = combo ? `x${combo}` : '—';
   b2bEl.classList.toggle('hidden', !b2bActive);
+  updateEnergy();
   updateObjective();
+}
+
+function updateEnergy() {
+  const ready = energy >= ENERGY_MAX;
+  energyFillEl.style.height = `${(energy / ENERGY_MAX) * 100}%`;
+  energyBarEl.classList.toggle('ready', ready);
+  energyBarEl.setAttribute('aria-valuemax', ENERGY_MAX);
+  energyBarEl.setAttribute('aria-valuenow', energy);
+  abilityBtn.disabled = !ready || gameOver;
+  updateSlowStatus();
+}
+
+function updateSlowStatus() {
+  const text = slowRemaining > 0 ? `Lento ${Math.ceil(slowRemaining / 1000)}s` : '';
+  if (slowStatusEl.textContent !== text) slowStatusEl.textContent = text;
 }
 
 function formatTime(ms) {
@@ -697,6 +734,7 @@ function draw() {
   drawLightningEffect();
   drawInkEffect();
   drawGravityEffect();
+  drawSlowOverlay();
   drawFreezeOverlay();
   drawComboPopup();
 }
@@ -825,24 +863,43 @@ function drawFreezeOverlay() {
   ctx.globalAlpha = 1;
 }
 
-function drawNext() {
-  const NB = 30;
-  nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-  const shape = next.shape;
-  const offX = Math.floor((4 - shape[0].length) / 2);
-  const offY = Math.floor((4 - shape.length) / 2);
-  for (let r = 0; r < shape.length; r++)
-    for (let c = 0; c < shape[r].length; c++)
-      drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
+function drawSlowOverlay() {
+  if (slowRemaining <= 0) return;
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#ffd54f';
+  ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
+  ctx.globalAlpha = 1;
 }
 
-function showOverlay(title, detail, { menu = false } = {}) {
+// Dibuja una pieza centrada en el hueco de 4 filas que empieza en la fila `top`
+function drawPreview(context, shape, size, top = 0) {
+  const offX = (context.canvas.width / size - shape[0].length) / 2;
+  const offY = top + Math.floor((4 - shape.length) / 2);
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      drawBlock(context, offX + c, offY + r, shape[r][c], size);
+}
+
+function drawPreviews() {
+  nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+  drawPreview(nextCtx, queue[0].shape, 30);
+
+  holdCtx.clearRect(0, 0, holdCanvas.width, holdCanvas.height);
+  if (heldType !== null) drawPreview(holdCtx, PIECES[heldType], 20);
+
+  peekSectionEl.classList.toggle('hidden', peekRemaining <= 0);
+  peekCtx.clearRect(0, 0, peekCanvas.width, peekCanvas.height);
+  queue.slice(0, peekRemaining).forEach((piece, i) => drawPreview(peekCtx, piece.shape, 12, i * 4));
+}
+
+function showOverlay(title, detail, { menu = false, abilities = false } = {}) {
   overlayTitle.textContent = title;
   overlayTitle.classList.toggle('success', title === WIN_TITLE);
   overlayScore.textContent = detail;
   levelListEl.classList.toggle('hidden', !menu);
-  restartBtn.classList.toggle('hidden', menu);
-  menuBtn.classList.toggle('hidden', menu);
+  abilityListEl.classList.toggle('hidden', !abilities);
+  restartBtn.classList.toggle('hidden', menu || abilities);
+  menuBtn.classList.toggle('hidden', menu || abilities);
   overlay.classList.remove('hidden');
 }
 
@@ -853,6 +910,7 @@ function finishGame(won, title = won ? WIN_TITLE : 'GAME OVER') {
   // sin efectos a medias congelados en el último fotograma
   explosion = lightningEffect = inkEffect = gravityEffect = popup = null;
   freezeRemaining = 0;
+  slowRemaining = 0;
   draw();
   updateHUD();
   showOverlay(title, `Puntuación: ${score.toLocaleString()}`);
@@ -890,6 +948,7 @@ function renderLevelList() {
 function showMenu() {
   cancelAnimationFrame(animId);
   inMenu = true;
+  choosingAbility = false;
   challenge = null;
   objectiveEl.classList.add('hidden');
   renderLevelList();
@@ -897,7 +956,7 @@ function showMenu() {
 }
 
 function togglePause() {
-  if (gameOver || inMenu) return;
+  if (gameOver || inMenu || choosingAbility) return;
   paused = !paused;
   if (!paused) {
     overlay.classList.add('hidden');
@@ -926,15 +985,18 @@ function loop(ts) {
   if (freezeRemaining > 0) {
     freezeRemaining = Math.max(0, freezeRemaining - dt);
   } else {
+    // la cámara lenta afecta a la caída y a la basura, no al reloj del desafío
+    const gameDt = slowRemaining > 0 ? dt * SLOW_FACTOR : dt;
+    slowRemaining = Math.max(0, slowRemaining - dt);
     if (challenge?.garbageInterval) {
-      garbageAccum += dt;
+      garbageAccum += gameDt;
       if (garbageAccum >= challenge.garbageInterval) {
         garbageAccum -= challenge.garbageInterval;
         addGarbage();
         if (gameOver) return;
       }
     }
-    dropAccum += dt;
+    dropAccum += gameDt;
     if (dropAccum >= dropInterval) {
       dropAccum = 0;
       if (!collide(current.shape, current.x, current.y + 1)) {
@@ -947,6 +1009,7 @@ function loop(ts) {
   }
   if (gameOver) return;
   updateObjective();
+  updateSlowStatus();
   draw();
   animId = requestAnimationFrame(loop);
 }
@@ -975,11 +1038,18 @@ function init() {
   combo = 0;
   b2bActive = false;
   popup = null;
+  energy = 0;
+  heldType = null;
+  peekRemaining = 0;
+  slowRemaining = 0;
+  undoSnapshot = null;
+  choosingAbility = false;
   canvas.classList.remove('shake');
   objectiveNameEl.textContent = challenge?.name ?? '';
   rotateLabelEl.textContent = challenge?.inverseRotation ? 'rotar ↺' : 'rotar';
   lastTime = performance.now();
-  next = randomPiece();
+  queue = [];
+  fillQueue();
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
@@ -991,9 +1061,13 @@ document.addEventListener('keydown', e => {
   initAudio();
   if (e.code === 'KeyM') { toggleMute(); return; }
   if (inMenu) return;
+  if (choosingAbility) { handleAbilityKey(e); return; }
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
+    case 'KeyE':
+      if (!e.repeat) openAbilityMenu();
+      return;
     case 'ArrowLeft':
       if (!collide(current.shape, current.x - 1, current.y)) {
         current.x--;
@@ -1019,6 +1093,12 @@ document.addEventListener('keydown', e => {
       break;
   }
   updateHUD();
+});
+
+abilityBtn.addEventListener('click', () => {
+  initAudio();
+  abilityBtn.blur(); // evita que Espacio vuelva a activar el botón
+  openAbilityMenu();
 });
 
 restartBtn.addEventListener('click', () => {

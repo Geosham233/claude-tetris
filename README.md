@@ -19,6 +19,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
   - [Controles](#controles)
   - [Combos y bonus](#combos-y-bonus)
   - [Modo desafío](#modo-desafío)
+  - [Habilidades](#habilidades)
   - [Cómo funciona](#cómo-funciona)
     - [1. `index.html`](#1-indexhtml)
     - [2. `style.css`](#2-stylecss)
@@ -48,6 +49,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Niveles** que aumentan cada 10 líneas y aceleran la caída.
 - **Pausa** y **Game Over** con opción de reinicio o regreso al menú.
 - **Modo desafío** con 5 niveles con objetivos (ver [Modo desafío](#modo-desafío)).
+- **Habilidades cargables** con una barra de energía (ver [Habilidades](#habilidades)).
 
 ---
 
@@ -90,6 +92,7 @@ Después abre `http://localhost:8000` en el navegador.
 | `↑` o `X` | Rotar la pieza en sentido horario |
 | `↓`       | Soft drop (bajar más rápido)      |
 | `Espacio` | Hard drop (caída instantánea)     |
+| `E`       | Elegir habilidad (barra llena)    |
 | `P`       | Pausar / reanudar                 |
 | `M`       | Silenciar / activar el sonido     |
 
@@ -128,9 +131,29 @@ Los niveles se configuran en `challenges.js`.
 
 ---
 
+## Habilidades
+
+Cada línea limpiada carga la barra de energía, que se llena con 6 líneas (el exceso se pierde). Con la barra llena, `E` o el botón **Habilidad** detiene el juego y permite elegir con `1`-`5` o con el ratón; `E` o `Esc` cancelan sin gastar energía. Usar una habilidad vacía la barra. Están disponibles en todos los modos.
+
+| Habilidad           | Efecto                                                                            |
+| ------------------- | --------------------------------------------------------------------------------- |
+| **1. Visión**       | Muestra las siguientes 5 piezas; la lista se acorta según van saliendo.           |
+| **2. Intercambio**  | Cambia la pieza actual por otra al azar (clásicas, N o pentominós), desde arriba. |
+| **3. Cámara lenta** | Durante 10 s la caída y la basura van al 40 % de velocidad. El reloj no.          |
+| **4. Deshacer**     | Revierte la última colocación (tablero, puntos y líneas) y devuelve esa pieza.    |
+| **5. Reservar**     | Guarda la pieza actual en **HOLD**; si ya hay una, las intercambia.               |
+
+- Las habilidades sin efecto posible aparecen desactivadas.
+- Deshacer no está disponible si ha subido basura después de la última colocación.
+- Recuperar la pieza reservada requiere volver a usar **Reservar**.
+
+Los valores se ajustan en `abilities.js`.
+
+---
+
 ## Cómo funciona
 
-El juego se compone de cuatro archivos que cooperan:
+El juego se compone de cinco archivos que cooperan:
 
 ### 1. `index.html`
 
@@ -158,7 +181,7 @@ Contiene toda la lógica del juego. A grandes rasgos:
 - **Nivel y velocidad**: el nivel sube cada 10 líneas; la velocidad de caída se calcula como `max(100, 1000 − (level − 1) × 90)` milisegundos.
 - **Ghost piece** (`ghostY`): proyecta la posición final de la pieza actual hacia abajo y la dibuja con `globalAlpha = 0.2`.
 
-`challenges.js` define los niveles del modo desafío y guarda el progreso.
+`challenges.js` define los niveles del modo desafío y guarda el progreso. `abilities.js` contiene la energía y las habilidades.
 
 ### Flujo del juego
 
@@ -167,8 +190,8 @@ showMenu() → elegir modo
         ↓
 init()
   ├─ createBoard()                  → matriz vacía
-  ├─ next = randomPiece()
-  ├─ spawn()                        → mueve next a current y genera nueva next
+  ├─ fillQueue()                    → cola de próximas piezas
+  ├─ spawn()                        → saca la primera de la cola y la rellena
   └─ requestAnimationFrame(loop)
         ↓
    loop(timestamp)
@@ -203,6 +226,7 @@ Cuando una pieza recién generada ya colisiona al aparecer (`spawn`), se dispara
 ├── index.html      # Estructura del DOM y canvas
 ├── style.css       # Estilos del juego (dark theme)
 ├── challenges.js   # Niveles del modo desafío y progreso
+├── abilities.js    # Energía y habilidades cargables
 ├── game.js         # Lógica del Tetris
 └── README.md
 ```
