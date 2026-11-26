@@ -22,16 +22,16 @@
     <div class="game-container">
       <aside class="panel side">
         <div class="panel-section">
+          <span class="label">HOLD</span>
+          <canvas id="hold-canvas" class="preview-canvas" width="96" height="96"></canvas>
+        </div>
+        <div class="panel-section">
           <span class="label">ENERGÍA</span>
           <div id="energy-bar" class="energy-bar" role="progressbar" aria-label="Energía" aria-valuemin="0">
             <div id="energy-fill"></div>
           </div>
           <button id="ability-btn" class="overlay-btn ability-btn" type="button" disabled>Habilidad (E)</button>
           <span id="slow-status"></span>
-        </div>
-        <div class="panel-section">
-          <span class="label">HOLD</span>
-          <canvas id="hold-canvas" class="preview-canvas" width="80" height="80"></canvas>
         </div>
         <div class="panel-section hidden" id="peek-section">
           <span class="label">VISIÓN</span>
@@ -79,6 +79,7 @@
             <li><kbd>↑</kbd> <span id="rotate-label">rotar</span></li>
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
+            <li><kbd>C</kbd><kbd>Shift</kbd> reservar</li>
             <li><kbd>E</kbd> habilidad</li>
             <li><kbd>P</kbd> pausa</li>
             <li><kbd>M</kbd> sonido</li>

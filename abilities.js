@@ -40,17 +40,6 @@ const ABILITIES = [
     canUse: () => undoSnapshot !== null,
     use: undoPlacement,
   },
-  {
-    name: 'Reservar',
-    description: 'Guarda la pieza actual o la cambia por la reservada',
-    canUse: () => fits(createPiece(heldType ?? queue[0].type)),
-    use() {
-      const type = current.type;
-      if (heldType === null) spawn();
-      else replaceCurrent(createPiece(heldType));
-      heldType = type;
-    },
-  },
 ];
 
 function fits(piece) {
@@ -79,7 +68,7 @@ function takeSnapshot() {
     score: spawnScore, // sin los puntos de bajada de la pieza que se deshace
     lines, level, dropInterval, combo, b2bActive,
     linesSincePowerUp, powerUpPending, singlesPending,
-    peekRemaining, freezeRemaining,
+    peekRemaining, freezeRemaining, heldType, holdUsed,
   };
 }
 
@@ -88,7 +77,7 @@ function undoPlacement() {
   ({
     board, queue, score, lines, level, dropInterval, combo, b2bActive,
     linesSincePowerUp, powerUpPending, singlesPending,
-    peekRemaining, freezeRemaining,
+    peekRemaining, freezeRemaining, heldType, holdUsed,
   } = state);
   spawnScore = score;
   replaceCurrent(createPiece(type));
@@ -106,7 +95,7 @@ function openAbilityMenu() {
   choosingAbility = true;
   cancelAnimationFrame(animId);
   renderAbilityList();
-  showOverlay('HABILIDAD', 'Elige con 1-5 · Esc para cancelar', { abilities: true });
+  showOverlay('HABILIDAD', `Elige con 1-${ABILITIES.length} · Esc para cancelar`, { abilities: true });
 }
 
 function closeAbilityMenu() {

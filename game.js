@@ -124,7 +124,7 @@ let board, current, queue, score, lines, level, paused, gameOver, lastTime, drop
     linesSincePowerUp, powerUpPending, singlesPending, explosion, lightningEffect, inkEffect,
     gravityEffect, freezeRemaining, combo, b2bActive, lastActionRotation, popup,
     elapsed, garbageAccum, lockFade,
-    energy, heldType, peekRemaining, slowRemaining, undoSnapshot, spawnScore, choosingAbility;
+    energy, heldType, holdUsed, peekRemaining, slowRemaining, undoSnapshot, spawnScore, choosingAbility;
 let challenge = null; // null = modo clásico
 let inMenu = true;
 let muted = false;
@@ -547,6 +547,7 @@ function fillQueue() {
 function spawn() {
   current = queue.shift();
   lastActionRotation = false;
+  holdUsed = false;
   spawnScore = score;
   // las recompensas se cuelan al frente de la cola
   if (powerUpPending) {
@@ -563,6 +564,19 @@ function spawn() {
   if (collide(current.shape, current.x, current.y)) {
     finishGame(false);
   }
+  drawPreviews();
+}
+
+// Hold: guarda la pieza actual o la intercambia con la reservada, una vez por pieza.
+// Si la pieza entrante no cabe en la salida no hace nada: nunca provoca Game Over.
+function holdPiece() {
+  if (holdUsed || !fits(createPiece(heldType ?? queue[0].type))) return;
+  const outgoing = current.type;
+  if (heldType === null) spawn();
+  else replaceCurrent(createPiece(heldType));
+  heldType = outgoing;
+  holdUsed = true; // después de spawn(), que lo desbloquea
+  dropAccum = 0;
   drawPreviews();
 }
 
@@ -885,7 +899,8 @@ function drawPreviews() {
   drawPreview(nextCtx, queue[0].shape, 30);
 
   holdCtx.clearRect(0, 0, holdCanvas.width, holdCanvas.height);
-  if (heldType !== null) drawPreview(holdCtx, PIECES[heldType], 20);
+  if (heldType !== null) drawPreview(holdCtx, PIECES[heldType], 24);
+  holdCanvas.classList.toggle('locked', holdUsed);
 
   peekSectionEl.classList.toggle('hidden', peekRemaining <= 0);
   peekCtx.clearRect(0, 0, peekCanvas.width, peekCanvas.height);
@@ -1040,6 +1055,7 @@ function init() {
   popup = null;
   energy = 0;
   heldType = null;
+  holdUsed = false;
   peekRemaining = 0;
   slowRemaining = 0;
   undoSnapshot = null;
@@ -1065,6 +1081,11 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
+    case 'KeyC':
+    case 'ShiftLeft':
+    case 'ShiftRight':
+      if (!e.repeat && !e.ctrlKey && !e.metaKey) holdPiece();
+      break;
     case 'KeyE':
       if (!e.repeat) openAbilityMenu();
       return;

@@ -19,6 +19,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
   - [Controles](#controles)
   - [Combos y bonus](#combos-y-bonus)
   - [Modo desafío](#modo-desafío)
+  - [Hold](#hold)
   - [Habilidades](#habilidades)
   - [Cómo funciona](#cómo-funciona)
     - [1. `index.html`](#1-indexhtml)
@@ -49,6 +50,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Niveles** que aumentan cada 10 líneas y aceleran la caída.
 - **Pausa** y **Game Over** con opción de reinicio o regreso al menú.
 - **Modo desafío** con 5 niveles con objetivos (ver [Modo desafío](#modo-desafío)).
+- **Hold** para reservar una pieza (ver [Hold](#hold)).
 - **Habilidades cargables** con una barra de energía (ver [Habilidades](#habilidades)).
 
 ---
@@ -86,15 +88,16 @@ Después abre `http://localhost:8000` en el navegador.
 
 ## Controles
 
-| Tecla     | Acción                            |
-| --------- | --------------------------------- |
-| `←` / `→` | Mover la pieza horizontalmente    |
-| `↑` o `X` | Rotar la pieza en sentido horario |
-| `↓`       | Soft drop (bajar más rápido)      |
-| `Espacio` | Hard drop (caída instantánea)     |
-| `E`       | Elegir habilidad (barra llena)    |
-| `P`       | Pausar / reanudar                 |
-| `M`       | Silenciar / activar el sonido     |
+| Tecla         | Acción                            |
+| ------------- | --------------------------------- |
+| `←` / `→`     | Mover la pieza horizontalmente    |
+| `↑` o `X`     | Rotar la pieza en sentido horario |
+| `↓`           | Soft drop (bajar más rápido)      |
+| `Espacio`     | Hard drop (caída instantánea)     |
+| `C` o `Shift` | Reservar la pieza (hold)          |
+| `E`           | Elegir habilidad (barra llena)    |
+| `P`           | Pausar / reanudar                 |
+| `M`           | Silenciar / activar el sonido     |
 
 ---
 
@@ -131,9 +134,20 @@ Los niveles se configuran en `challenges.js`.
 
 ---
 
+## Hold
+
+`C` o `Shift` envía la pieza actual al slot **HOLD**. Si ya había una guardada, se intercambian.
+
+- Solo se puede usar una vez por pieza: el slot se atenúa hasta que la pieza activa se asienta.
+- La pieza recuperada entra por arriba con su rotación original.
+- Si la pieza entrante no cabe en la zona de salida, no ocurre nada.
+- Se puede reservar cualquier pieza, incluidos los power-ups y la 1×1.
+
+---
+
 ## Habilidades
 
-Cada línea limpiada carga la barra de energía, que se llena con 6 líneas (el exceso se pierde). Con la barra llena, `E` o el botón **Habilidad** detiene el juego y permite elegir con `1`-`5` o con el ratón; `E` o `Esc` cancelan sin gastar energía. Usar una habilidad vacía la barra. Están disponibles en todos los modos.
+Cada línea limpiada carga la barra de energía, que se llena con 6 líneas (el exceso se pierde). Con la barra llena, `E` o el botón **Habilidad** detiene el juego y permite elegir con `1`-`4` o con el ratón; `E` o `Esc` cancelan sin gastar energía. Usar una habilidad vacía la barra. Están disponibles en todos los modos.
 
 | Habilidad           | Efecto                                                                            |
 | ------------------- | --------------------------------------------------------------------------------- |
@@ -141,11 +155,10 @@ Cada línea limpiada carga la barra de energía, que se llena con 6 líneas (el 
 | **2. Intercambio**  | Cambia la pieza actual por otra al azar (clásicas, N o pentominós), desde arriba. |
 | **3. Cámara lenta** | Durante 10 s la caída y la basura van al 40 % de velocidad. El reloj no.          |
 | **4. Deshacer**     | Revierte la última colocación (tablero, puntos y líneas) y devuelve esa pieza.    |
-| **5. Reservar**     | Guarda la pieza actual en **HOLD**; si ya hay una, las intercambia.               |
 
 - Las habilidades sin efecto posible aparecen desactivadas.
 - Deshacer no está disponible si ha subido basura después de la última colocación.
-- Recuperar la pieza reservada requiere volver a usar **Reservar**.
+- Deshacer también restaura el slot **HOLD** al estado que tenía al colocar la pieza.
 
 Los valores se ajustan en `abilities.js`.
 
