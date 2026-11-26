@@ -19,6 +19,10 @@ const COLORS = [
   '#ab47bc', // ink (wildcard)
   '#8d6e63', // gravity
   '#4fc3f7', // freeze
+  '#f06292', // + (pentomino)
+  '#aed581', // U (pentomino)
+  '#7986cb', // Y (pentomino)
+  '#fafafa', // single (recompensa por tetris)
 ];
 
 const PIECES = [
@@ -36,9 +40,19 @@ const PIECES = [
   [[11]],                                      // ink (1x1)
   [[12]],                                      // gravity (1x1)
   [[13]],                                      // freeze (1x1)
+  [[0,14,0],[14,14,14],[0,14,0]],             // + (pentomino)
+  [[15,0,15],[15,15,15],[0,0,0]],             // U (pentomino)
+  [[0,0,0,0],[16,16,16,16],[0,16,0,0],[0,0,0,0]], // Y (pentomino)
+  [[17]],                                      // single (1x1)
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
+
+const BASE_PIECE_COUNT = 8;     // tipos 1-8: clásicas + N
+const PENTOMINO_TYPES = [14, 15, 16];
+const PENTOMINO_CHANCE = 0.10;  // probabilidad total, repartida entre los pentominós
+const SINGLE_TYPE = 17;
+const TETRIS_LINES = 4;         // líneas de golpe que premian con una pieza 1x1
 
 const BOMB_TYPE = 9;
 const LIGHTNING_TYPE = 10;
@@ -71,7 +85,7 @@ const themeToggleBtn = document.getElementById('theme-toggle');
 const THEME_KEY = 'tetris-theme';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
-    linesSincePowerUp, powerUpPending, explosion, lightningEffect, inkEffect,
+    linesSincePowerUp, powerUpPending, singlesPending, explosion, lightningEffect, inkEffect,
     gravityEffect, freezeRemaining;
 
 function applyTheme(theme) {
@@ -98,13 +112,14 @@ function createBoard() {
 }
 
 function randomPiece() {
-  // solo piezas normales (1-8); los power-ups se inyectan desde spawn() al completar líneas
-  const type = Math.floor(Math.random() * 8) + 1;
-  const shape = PIECES[type].map(row => [...row]);
-  return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+  // piezas normales y pentominós; power-ups y 1x1 se inyectan desde spawn() al completar líneas
+  const type = Math.random() < PENTOMINO_CHANCE
+    ? PENTOMINO_TYPES[Math.floor(Math.random() * PENTOMINO_TYPES.length)]
+    : Math.floor(Math.random() * BASE_PIECE_COUNT) + 1;
+  return createPiece(type);
 }
 
-function createPowerUpPiece(type) {
+function createPiece(type) {
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
@@ -185,6 +200,7 @@ function clearLines() {
     score += (LINE_SCORES[cleared] || 0) * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    if (cleared >= TETRIS_LINES) singlesPending++;
     linesSincePowerUp += cleared;
     if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
       powerUpPending = true;
@@ -301,8 +317,12 @@ function spawn() {
   current = next;
   if (powerUpPending) {
     const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
-    next = createPowerUpPiece(type);
+    next = createPiece(type);
     powerUpPending = false;
+  } else if (singlesPending > 0) {
+    // el power-up tiene prioridad; la 1x1 sale justo después
+    next = createPiece(SINGLE_TYPE);
+    singlesPending--;
   } else {
     next = randomPiece();
   }
@@ -327,6 +347,12 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  if (colorIndex === SINGLE_TYPE) {
+    // contorno para que el bloque blanco se vea en el tema claro
+    context.strokeStyle = 'rgba(20,20,20,0.85)';
+    context.lineWidth = size * 0.08;
+    context.strokeRect(x * size + size * 0.2, y * size + size * 0.2, size * 0.6, size * 0.6);
+  }
   if (colorIndex === BOMB_TYPE) {
     context.fillStyle = 'rgba(20,20,20,0.85)';
     context.beginPath();
@@ -572,6 +598,7 @@ function init() {
   dropAccum = 0;
   linesSincePowerUp = 0;
   powerUpPending = false;
+  singlesPending = 0;
   explosion = null;
   lightningEffect = null;
   inkEffect = null;
