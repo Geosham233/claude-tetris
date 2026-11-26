@@ -69,6 +69,15 @@ const INK_DURATION = 300;       // ms de flash visual
 const GRAVITY_DURATION = 300;   // ms de flash visual
 const FREEZE_DURATION = 5000;   // ms de pausa real de la caída
 
+const T_TYPE = 3;
+const TSPIN_SCORES = [400, 800, 1200, 1600];             // por 0-3 líneas
+const PERFECT_CLEAR_SCORES = [0, 800, 1200, 1800, 2000]; // por 1-4+ líneas
+const B2B_MULTIPLIER = 1.5;
+const CLEAR_NAMES = ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS'];
+const POPUP_DURATION = 1200;          // ms del texto flotante
+const PERFECT_FLASH_DURATION = 500;   // ms del destello de perfect clear
+const SHAKE_MAX_COMBO = 6;            // combo a partir del cual la sacudida no crece
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -81,12 +90,18 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const soundToggleBtn = document.getElementById('sound-toggle');
+const comboEl = document.getElementById('combo');
+const b2bEl = document.getElementById('b2b');
 
 const THEME_KEY = 'tetris-theme';
+const MUTE_KEY = 'tetris-muted';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId,
     linesSincePowerUp, powerUpPending, singlesPending, explosion, lightningEffect, inkEffect,
-    gravityEffect, freezeRemaining;
+    gravityEffect, freezeRemaining, combo, b2bActive, lastActionRotation, popup;
+let muted = false;
+let audioCtx = null;
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -106,6 +121,58 @@ themeToggleBtn.addEventListener('click', () => {
 });
 
 initTheme();
+
+function applyMute(value) {
+  muted = value;
+  soundToggleBtn.textContent = muted ? '🔇' : '🔊';
+  soundToggleBtn.setAttribute('aria-label', muted ? 'Activar sonido' : 'Silenciar');
+}
+
+function toggleMute() {
+  applyMute(!muted);
+  localStorage.setItem(MUTE_KEY, muted ? '1' : '0');
+}
+
+soundToggleBtn.addEventListener('click', () => {
+  initAudio();
+  toggleMute();
+  soundToggleBtn.blur(); // evita que Espacio vuelva a activar el botón
+});
+
+applyMute(localStorage.getItem(MUTE_KEY) === '1');
+
+// El navegador solo permite audio tras una interacción del usuario
+function initAudio() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  if (!audioCtx) audioCtx = new AudioContextClass();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, delay, duration, wave, volume) {
+  const start = audioCtx.currentTime + delay;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = wave;
+  osc.frequency.setValueAtTime(freq, start);
+  gain.gain.setValueAtTime(volume, start);
+  gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(start);
+  osc.stop(start + duration);
+}
+
+function playTurnSound({ cleared, tspin, b2b, perfect, comboCount }) {
+  if (muted || !audioCtx || audioCtx.state !== 'running') return;
+  if (cleared) {
+    // un tono entero más agudo por cada eslabón del combo
+    const base = 330 * Math.pow(2, Math.min(comboCount - 1, 12) / 6);
+    [1, 1.25, 1.5].forEach((ratio, i) => playTone(base * ratio, i * 0.05, 0.15, 'square', 0.05));
+  }
+  if (tspin) [622, 932].forEach((f, i) => playTone(f, 0.15 + i * 0.08, 0.18, 'sawtooth', 0.05));
+  if (b2b) [196, 262, 392].forEach((f, i) => playTone(f, 0.2 + i * 0.07, 0.22, 'triangle', 0.12));
+  if (perfect) [523, 659, 784, 1047, 1319].forEach((f, i) => playTone(f, 0.3 + i * 0.09, 0.3, 'triangle', 0.12));
+}
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -173,6 +240,7 @@ function tryRotate() {
     if (!collide(rotated, current.x + kick, current.y)) {
       current.shape = rotated;
       current.x += kick;
+      lastActionRotation = true;
       return;
     }
   }
@@ -195,19 +263,83 @@ function clearLines() {
       r++;
     }
   }
-  if (cleared) {
-    lines += cleared;
-    score += (LINE_SCORES[cleared] || 0) * level;
-    level = Math.floor(lines / 10) + 1;
-    dropInterval = Math.max(100, 1000 - (level - 1) * 90);
-    if (cleared >= TETRIS_LINES) singlesPending++;
-    linesSincePowerUp += cleared;
-    if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
-      powerUpPending = true;
-      linesSincePowerUp -= POWERUP_LINE_INTERVAL;
+  return cleared;
+}
+
+// T-spin: la última acción fue un giro y 3 de las 4 esquinas del centro de la T
+// están ocupadas (paredes y suelo cuentan). Se evalúa antes de fijar la pieza.
+function isTSpin() {
+  if (current.type !== T_TYPE || !lastActionRotation) return false;
+  const corners = [[0, 0], [2, 0], [0, 2], [2, 2]];
+  const filled = corners.filter(([dx, dy]) => collide([[1]], current.x + dx, current.y + dy));
+  return filled.length >= 3;
+}
+
+function isBoardEmpty() {
+  return board.every(row => row.every(v => v === 0));
+}
+
+function scoreTurn(cleared, tspin, isPowerUp) {
+  if (!cleared) {
+    // un power-up sin líneas es neutro para el combo
+    if (!isPowerUp) combo = 0;
+    if (tspin) {
+      const points = TSPIN_SCORES[0] * level;
+      score += points;
+      showTurnEffects({ cleared, tspin, points, labels: ['T-SPIN'] });
     }
     updateHUD();
+    return;
   }
+
+  const rank = Math.min(cleared, TETRIS_LINES); // tinta y gravedad pueden limpiar más de 4
+  const isTetris = cleared >= TETRIS_LINES;
+  const b2b = isTetris && b2bActive;
+  const perfect = isBoardEmpty();
+  combo++;
+  b2bActive = isTetris;
+
+  const base = (tspin ? TSPIN_SCORES[rank] : LINE_SCORES[rank]) * level;
+  const bonus = perfect ? PERFECT_CLEAR_SCORES[rank] * level : 0;
+  const points = Math.round(base * (b2b ? B2B_MULTIPLIER : 1) * combo) + bonus;
+  score += points;
+
+  lines += cleared;
+  level = Math.floor(lines / 10) + 1;
+  dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+  if (isTetris) singlesPending++;
+  linesSincePowerUp += cleared;
+  if (!powerUpPending && linesSincePowerUp >= POWERUP_LINE_INTERVAL) {
+    powerUpPending = true;
+    linesSincePowerUp -= POWERUP_LINE_INTERVAL;
+  }
+
+  const labels = [];
+  if (perfect) labels.push('PERFECT CLEAR');
+  if (b2b) labels.push('B2B TETRIS');
+  else if (tspin) labels.push(`T-SPIN ${CLEAR_NAMES[rank]}`);
+  else if (isTetris) labels.push('TETRIS');
+  if (combo > 1) labels.push(`COMBO x${combo}`);
+  showTurnEffects({ cleared, tspin, b2b, perfect, comboCount: combo, points, labels });
+  updateHUD();
+}
+
+function showTurnEffects(turn) {
+  // una limpieza simple sin cadena solo suena
+  if (turn.labels.length) {
+    popup = { labels: turn.labels, points: turn.points, perfect: turn.perfect, startTime: performance.now() };
+  }
+  if (turn.tspin || turn.b2b || turn.perfect || turn.comboCount > 1) {
+    shakeBoard(turn.perfect ? SHAKE_MAX_COMBO : Math.min(turn.comboCount || 1, SHAKE_MAX_COMBO));
+  }
+  playTurnSound(turn);
+}
+
+function shakeBoard(intensity) {
+  canvas.style.setProperty('--shake', `${intensity + 1}px`);
+  canvas.classList.remove('shake');
+  void canvas.offsetWidth; // reinicia la animación
+  canvas.classList.add('shake');
 }
 
 function triggerExplosion(cx, cy) {
@@ -279,6 +411,7 @@ function ghostY() {
 
 function hardDrop() {
   const gy = ghostY();
+  if (gy > current.y) lastActionRotation = false;
   score += (gy - current.y) * 2;
   current.y = gy;
   lockPiece();
@@ -287,6 +420,7 @@ function hardDrop() {
 function softDrop() {
   if (!collide(current.shape, current.x, current.y + 1)) {
     current.y++;
+    lastActionRotation = false;
     score += 1;
     updateHUD();
   } else {
@@ -296,6 +430,8 @@ function softDrop() {
 
 function lockPiece() {
   lightningEffect = null; // evita animar un tablero que ya cambió
+  const isPowerUp = POWERUP_TYPES.includes(current.type);
+  const tspin = isTSpin();
   if (isBomb(current)) {
     triggerExplosion(current.x, current.y);
   } else if (isLightning(current)) {
@@ -309,12 +445,13 @@ function lockPiece() {
   } else {
     merge();
   }
-  clearLines();
+  scoreTurn(clearLines(), tspin, isPowerUp);
   spawn();
 }
 
 function spawn() {
   current = next;
+  lastActionRotation = false;
   if (powerUpPending) {
     const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
     next = createPiece(type);
@@ -336,6 +473,8 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  comboEl.textContent = combo ? `x${combo}` : '—';
+  b2bEl.classList.toggle('hidden', !b2bActive);
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -460,6 +599,40 @@ function draw() {
   drawInkEffect();
   drawGravityEffect();
   drawFreezeOverlay();
+  drawComboPopup();
+}
+
+function drawComboPopup() {
+  if (!popup) return;
+  const elapsed = performance.now() - popup.startTime;
+  if (elapsed >= POPUP_DURATION) { popup = null; return; }
+  const t = elapsed / POPUP_DURATION;
+
+  ctx.save();
+  if (popup.perfect && elapsed < PERFECT_FLASH_DURATION) {
+    ctx.globalAlpha = (1 - elapsed / PERFECT_FLASH_DURATION) * 0.7;
+    ctx.fillStyle = '#ffe082';
+    ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
+  }
+
+  ctx.globalAlpha = Math.min(1, (1 - t) * 2); // opaco la primera mitad y luego se desvanece
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = 'rgba(10,10,20,0.85)';
+  const x = (COLS * BLOCK) / 2;
+  let y = ROWS * BLOCK * 0.4 - t * 50;
+  const texts = [...popup.labels, `+${popup.points.toLocaleString()}`];
+  texts.forEach((text, i) => {
+    const isPoints = i === texts.length - 1;
+    ctx.font = `800 ${isPoints ? 20 : 28}px system-ui, sans-serif`;
+    ctx.fillStyle = isPoints ? '#ffffff' : '#ffd54f';
+    ctx.strokeText(text, x, y, COLS * BLOCK - 10);
+    ctx.fillText(text, x, y, COLS * BLOCK - 10);
+    y += 34;
+  });
+  ctx.restore();
 }
 
 function drawExplosion() {
@@ -577,6 +750,7 @@ function loop(ts) {
       dropAccum = 0;
       if (!collide(current.shape, current.x, current.y + 1)) {
         current.y++;
+        lastActionRotation = false;
       } else {
         lockPiece();
       }
@@ -604,6 +778,10 @@ function init() {
   inkEffect = null;
   gravityEffect = null;
   freezeRemaining = 0;
+  combo = 0;
+  b2bActive = false;
+  popup = null;
+  canvas.classList.remove('shake');
   lastTime = performance.now();
   next = randomPiece();
   spawn();
@@ -614,14 +792,22 @@ function init() {
 }
 
 document.addEventListener('keydown', e => {
+  initAudio();
+  if (e.code === 'KeyM') { toggleMute(); return; }
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
     case 'ArrowLeft':
-      if (!collide(current.shape, current.x - 1, current.y)) current.x--;
+      if (!collide(current.shape, current.x - 1, current.y)) {
+        current.x--;
+        lastActionRotation = false;
+      }
       break;
     case 'ArrowRight':
-      if (!collide(current.shape, current.x + 1, current.y)) current.x++;
+      if (!collide(current.shape, current.x + 1, current.y)) {
+        current.x++;
+        lastActionRotation = false;
+      }
       break;
     case 'ArrowDown':
       softDrop();
@@ -638,6 +824,10 @@ document.addEventListener('keydown', e => {
   updateHUD();
 });
 
-restartBtn.addEventListener('click', init);
+restartBtn.addEventListener('click', () => {
+  initAudio();
+  restartBtn.blur();
+  init();
+});
 
 init();

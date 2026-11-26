@@ -12,7 +12,7 @@
   --accent-hover: #9bbdff;
   --board-bg: #1a1a25;
   --panel-border: #2a2a3a;
-  --label-color: #555570;
+  --label-color: #8585a3;
   --control-color: #888;
   --kbd-bg: #22223a;
   --kbd-border: #3a3a5a;
@@ -125,7 +125,7 @@ body {
 }
 
 .label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 2px;
   color: var(--label-color);
   font-weight: 600;
@@ -144,6 +144,40 @@ body {
   border: 1px solid var(--panel-border);
   background: var(--board-bg);
   border-radius: 4px;
+}
+
+/* ---- Combo ---- */
+.badge {
+  align-self: flex-start;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.badge.hidden {
+  display: none;
+}
+
+#board.shake {
+  animation: shake 0.3s ease-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(calc(var(--shake, 2px) * -1), 1px); }
+  40% { transform: translate(var(--shake, 2px), -1px); }
+  60% { transform: translate(calc(var(--shake, 2px) * -0.6), 0); }
+  80% { transform: translate(calc(var(--shake, 2px) * 0.3), 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #board.shake {
+    animation: none;
+  }
 }
 
 /* ---- Controles ---- */

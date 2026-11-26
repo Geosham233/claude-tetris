@@ -16,6 +16,7 @@
   <div class="wrapper">
     <div class="header-row">
       <h1 class="game-title">TETRIS</h1>
+      <button id="sound-toggle" class="theme-toggle" type="button" aria-label="Silenciar" title="Sonido (M)">🔊</button>
       <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Cambiar a modo claro" title="Cambiar tema">🌙</button>
     </div>
     <div class="game-container">
@@ -36,6 +37,12 @@
         </div>
 
         <div class="panel-section">
+          <span class="label">COMBO</span>
+          <span class="value" id="combo">—</span>
+          <span class="badge hidden" id="b2b" title="El próximo Tetris puntúa x1.5">B2B</span>
+        </div>
+
+        <div class="panel-section">
           <span class="label">NEXT</span>
           <canvas id="next-canvas" width="120" height="120"></canvas>
         </div>
@@ -48,6 +55,7 @@
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
             <li><kbd>P</kbd> pausa</li>
+            <li><kbd>M</kbd> sonido</li>
           </ul>
         </div>
       </aside>

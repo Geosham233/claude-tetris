@@ -17,6 +17,7 @@ Implementación del clásico **Tetris** en JavaScript vanilla, usando HTML5 Canv
     - [Opción 1: abrir el archivo directamente](#opción-1-abrir-el-archivo-directamente)
     - [Opción 2: servidor local (recomendado)](#opción-2-servidor-local-recomendado)
   - [Controles](#controles)
+  - [Combos y bonus](#combos-y-bonus)
   - [Cómo funciona](#cómo-funciona)
     - [1. `index.html`](#1-indexhtml)
     - [2. `style.css`](#2-stylecss)
@@ -42,6 +43,7 @@ Es una versión jugable del Tetris clásico con todas las mecánicas que esperar
 - **Pieza fantasma** (_ghost piece_): muestra dónde aterrizará la pieza actual.
 - **Vista previa** de la siguiente pieza.
 - **Sistema de puntuación** clásico de Tetris (100 / 300 / 500 / 800 multiplicado por nivel).
+- **Modo combo y multiplicadores** (ver [Combos y bonus](#combos-y-bonus)), con efectos visuales y sonoros.
 - **Niveles** que aumentan cada 10 líneas y aceleran la caída.
 - **Pausa** y **Game Over** con opción de reinicio.
 
@@ -87,6 +89,20 @@ Después abre `http://localhost:8000` en el navegador.
 | `↓`       | Soft drop (bajar más rápido)      |
 | `Espacio` | Hard drop (caída instantánea)     |
 | `P`       | Pausar / reanudar                 |
+| `M`       | Silenciar / activar el sonido     |
+
+---
+
+## Combos y bonus
+
+| Jugada            | Regla                                                                                                      |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Combo**         | Cada pieza consecutiva que limpia líneas sube el multiplicador (x1, x2, x3…). Una pieza sin líneas lo reinicia; un power-up sin líneas no lo afecta. |
+| **T-spin**        | La T se fija tras un giro con 3 de las 4 esquinas de su centro ocupadas. Base por 0/1/2/3 líneas: 400/800/1200/1600 × nivel. |
+| **B2B Tetris**    | Un Tetris cuya limpieza anterior también fue un Tetris vale ×1.5. Cualquier otra limpieza rompe la cadena. |
+| **Perfect clear** | Dejar el tablero vacío suma 800/1200/1800/2000 × nivel (según 1/2/3/4+ líneas).                            |
+
+Puntos de una limpieza: `base × B2B × combo + perfect clear`. El T-spin sin líneas no se multiplica y rompe el combo.
 
 ---
 
